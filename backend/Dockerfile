@@ -1,12 +1,37 @@
+# Stage 1: dependebcy installation and build stage
 FROM python:3.10-alpine AS builder
-WORKDIR /app
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
 
+# Install system dependencies
+RUN apk add --no-cache gcc musl-dev libffi-dev postgresql-dev
 
-FROM python:3.10-alpine
+# Install Poetry
+RUN pip install --no-cache-dir poetry
+
 WORKDIR /app
-COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir --find-links=/wheels -r /wheels/*
+
+COPY pyproject.toml poetry.lock ./
+
+# Install dependencies into a virtual environment
+RUN poetry config virtualenvs.create false && poetry install --no-dev --no-interaction --no-ansi
+
 COPY . .
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Stage 2: Runtime image
+FROM python:3.10-alpine
+
+# Install runtime dependencies
+RUN apk add --no-cache libpq
+
+WORKDIR /app
+
+# Copy the built app and dependencies
+COPY --from=builder /app /app
+
+# Copy the prestart script
+COPY ./prestart.sh /prestart.sh
+
+# Expose application port
+EXPOSE 8000
+
+# Run the app
+CMD ["sh", "-c", "bash /prestart.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
